@@ -109,96 +109,156 @@ ni_data_2 <- ni_data %>% filter(sector=="All Creative Enterprises") %>%
             gva_thGBP_abs,employment_abs,gva_per_employee_thGBP_abs,
             period)
 
-gva_region_data_all <- rbind(gva_region_data,ni_data_2)
+gva_region_data_creative <- rbind(gva_region_data,ni_data_2)
+
+#Read GVA data (all sectors) (including NI added by hand)
+gva_region_all_sectors <- ReadWorkSheet(x="vml_datasets_jan2016/spd - data for digital tech clusters - GVA - 13-01-16 STC.xls",
+                                y="region_all",z=3) %>% select(-1)
+names(gva_region_all_sectors)[3:6] <- paste0(names(gva_region_all_sectors)[3:6],"_abs")
 
 #####
 #2.CLEAN
 #####
+
+#1. ttwa.all data
 ttwa.all <- BindAreas(ttwa_2007_all_creative,ttwa_2010_all_creative,
                           ttwa_2014_all_creative) %>% tbl_df() %>%
      rename(ttwa.code=ttwa.code..2011.,
             ttwa.name=ttwa.name..2011.)
 
+     #Label TTWAs and allocate them into regions (in the ttwa.all
+          #dataset we are matching with GVA data)
+     #Allocate TTWAs into regions.
+          #Preamble-Create table to apply over 
+          ttwa_region_table <- table(nspl2015_labelled$ttwa.name,
+                                            nspl2015_labelled$gor.name)
+          ttwa_region_df <- data.frame(ttwa=row.names(ttwa_region_table),
+                                       as.data.frame.matrix(ttwa_region_table,row.names = F)) %>%
+               filter(ttwa!="")
+          
+          #Apply to obtain region-ttwa pairs
+          region_ttwas <- do.call(rbind,apply(ttwa_region_df,1,
+                                function(x){
+                                     top_reg <- names(x)[which.max(x)]
+                                     return(data.frame(ttwa.name=x[1],region=top_reg))
+                                })) %>% mutate(region=gsub("\\."," ",region))
+     
+     #Merge
+     ttwa.all_labelled <- ttwa.all %>% left_join(region_ttwas)
+     
+     #Final cleaning of ttwa.all
+     all.cis.bsd_ttwa <- ttwa.all_labelled %>%
+          rename(business_local.share=proportion.of.local.enterprises.in.sector,
+                 turnover_local.share=proportion.of.local.turnover.in.sector,
+                 emp_local.share=proportion.of.local.employment.in.sector,
+                 business_lq=location.quotient...business.count,
+                 turnover_lq=location.quotient..turnover,
+                 emp_lq=location.quotient...employment) %>%
+          mutate(
+               turn_pw = turnover/employment,
+               turn_pb = turnover/business.count,
+               work_pb = employment/business.count) %>%
+          select(-contains("uk."))
+
+#2. Subsectoral ttwa
 #NB there was an empty column #17 in ttwa_2011_14
 ttwa.sub <- BindAreas(ttwa_2007_10_subsector,
                       ttwa_2011_14_subsector[,1:16]) %>% tbl_df() %>%
      rename(ttwa.code=ttwa.code..2011.,
             ttwa.name=ttwa.name..2011.)
 
-#AND THEY USED 2011 TTWAS
+#Final cleaning of subsectoral ttwa including variable renames
+subsectors_ttwa <- ttwa.sub %>%
+     mutate(year=ifelse(year=="2007 - 2010","2007_10","2011_14")) %>%
+     rename(business_local.share=proportion.of.local.enterprises.in.sector,
+            turnover_local.share=proportion.of.local.turnover.in.sector,
+            emp_local.share=proportion.of.local.employment.in.sector,
+            business_lq=location.quotient...business.count,
+            emp_lq=location.quotient...employment,
+            turnover_lq=location.quotient..turnover) %>%
+     mutate(
+            turn_pw = turnover/employment,
+            turn_pb = turnover/business.count,
+            work_pb = employment/business.count) %>%
+     select(-contains("uk."))
 
 ######
 #3. ESTIMATE GVA
 ######
+#To do this, we need to:
+     #Estimate average creative employment 2008_10 and 2011_14
+     ttwa_creative_for.gva <- ttwa.all_labelled %>% tbl_df() %>%
+          select(year,ttwa.code,ttwa.name,employment,region) %>%
+          filter(year!=2007) %>% 
+          mutate(period=ifelse(year<=2010,"2008_10","2011_14")) %>%
+          group_by(ttwa.name,ttwa.code,region,period) %>% 
+          summarise(employment=mean(employment))
+          
+     #Estimate average all_sector employment 2008_10 and 2011_14
+     ttwa_all.inds_for.gva_tmp <- ttwa_all_industries %>% tbl_df() %>%
+          rename(ttwa.code=ttwa.code..2011.) %>%
+          select(year,ttwa.code,total.employment) %>%
+          filter(year!=2007) %>% 
+          mutate(period=ifelse(year<=2010,"2008_10","2011_14")) %>%
+          group_by(ttwa.code,period) %>% 
+          summarise(total.employment=mean(total.employment))
+     
+     #Relabel creative GVA
+     gva_region_data_creative_tmp <- gva_region_data_creative %>%
+          rename(gva_pw_creative_abs=gva_per_employee_thGBP_abs)
+     
+     #Estimate average all sector GVA per worker 2008_10 and 2011_14
+     gva_region_all_sectors_tmp <- gva_region_all_sectors %>%
+          mutate(period=ifelse(Year<=2010,"2008_10","2011_14")) %>%
+          group_by(Region,period) %>%
+          summarise(gva_all_abs=mean(Total.basic.GVA...000._abs),
+                    employment_all_abs=mean(Total.employment_abs)) %>%
+          mutate(gva_pw_all_abs = gva_all_abs/employment_all_abs) %>%
+          rename(region=Region)
+     
+     #Relabel Yorkshire & the Humber to YS AND the humber.
+     levels(
+          gva_region_all_sectors_tmp$region)[
+               grep("Yorkshire",
+                    levels(gva_region_all_sectors_tmp$region))] <- "Yorkshire and the Humber"
+     
+     #Merge them
+     #First merge the ttwa dfs
+     ttwas_for_gva_tmp <- ttwa_creative_for.gva %>%
+          left_join(ttwa_all.inds_for.gva_tmp,by=c("ttwa.code","period"))
 
-#Estimate average employment in CIs per TTWA in 2008/9 and 2010/13
-ttwa.all_gva1 <- tbl_df(ttwa.all) %>% 
-     select(year,ttwa.name,ttwa.code,employment,business.count,turnover,
-            contains("location.quotient"),contains("Proportion")) %>%
-     rename(emp.lq=location.quotient...employment,
-            business.lq=location.quotient...business.count,
-            turnover.lq=location.quotient..turnover,
-            business.share=proportion.of.local.enterprises.in.sector,
-            employment.share=proportion.of.local.employment.in.sector,
-            turnover.share.turnover=proportion.of.local.turnover.in.sector)
+     #Second merge the gva dfs
+     regions_for_gva_tmp <- gva_region_data_creative_tmp %>%
+          left_join(gva_region_all_sectors_tmp,by=c("region","period"))
+     
+     #Final merge of TTWA and GVA Dfs
+     ttwa_gva_data <- ttwas_for_gva_tmp %>%
+          left_join(regions_for_gva_tmp,by=c("region","period")) %>%
+          mutate(gva_total_creative = gva_pw_creative_abs*employment,
+                 gva_total_all=gva_pw_all_abs*total.employment,
+                 period.string=ifelse(period=="2008_10","first.period",
+                                      "second.period")) %>%
+          select(ttwa.name,ttwa.code,region,
+                 period,period.string,
+                 employment,total.employment,
+                 gva_total_creative,gva_total_all,
+                 gva_pw_creative_abs,gva_pw_all_abs)
+     
+     #WriteOut(ttwa_gva_data,"final-report-data/")
 
-#Merge with TTWA employment data for all sectors - we use this
-#data later for normalisation
-ttwa.all_gva2 <- merge(ttwa.all_gva1,
-                                ttwa.all.industries,
-                                by.x=c("year","ttwa.code"),
-                                by.y=c("year","ttwa.code..2007."),
-                                all.x=T)
-
-#Modify ttwa codes to match with a lookup later
-ttwa.all_gva2$ttwa.code <- 
-     sapply(ttwa.all_gva2$ttwa.code,
-                                           function(x){
-                                                x <- as.character(x)
-                                                if(nchar(x)==1) {
-                                                     out <- paste0("00",x)
-                                                     return(out)
-                                                } else if (nchar(x)==2) {
-                                                     out <- paste0("0",x)
-                                                     return(out)
-                                                } else {
-                                                     return(x)}
-                                           })
-#Read in TTWA-GOR lookup
-lookup_ttwa.gor <- read.csv("final-report-metadata-lookups/ttwa.gor.codes_lookup2-2015-11-26.csv")
-
-#Merge
-ttwa.all_gva3 <- merge(ttwa.all_gva2,
-                                lookup_ttwa.gor[,c("ttwa.code","gor.name")],
-                                by.x="ttwa.code",
-                                by.y="ttwa.code",
-                                all.x=T) %>% tbl_df()
-
-#Create a "period" variable for matching.
-ttwa.all_gva3$period <- sapply(ttwa.all_gva3$year,
-                                        function(x){
-                                             if (x==2007) {return("first")
-                                             } else if (x==2013) {
-                                                  return("second")
-                                             } else {return("middle")}
-                                        })
-
-#Do the same thing in the GVA data source
-gva.region.data$period.2 <- sapply(gva.region.data$Period, function(x){
-     if(x=="2008_09") {return("first")
-     } else {return("second")}
-})
-
-#Merge by both
-ttwa.all_gva4 <- merge(ttwa.all_gva3,
-                                gva.region.data,
-                                by.x=c("period","gor.name"),
-                                by.y=c("period.2","Region"),
-                                all.x=T) %>% tbl_df()
-
-#Clean dataset with all statistics for creative industries
-ttwa.all_clean1 <- ttwa.all_gva4 %>% 
-     select(-ttwa.code) %>%
-     rename(gva.per.worker=Average.GVA.per.employee) %>%
-     mutate(gva.creativeThGBP = employment * gva.per.worker)
+#Merge the all creative industries datasets
+     #using a "period string"
+     all.cis_ttwa <- all.cis.bsd_ttwa %>%
+          mutate(period.string=
+                      ifelse(year<2010,"first.period","second.period")) %>%
+          left_join(ttwa_gva_data,by=c("ttwa.name","period.string")) %>%
+          select(-contains(".y"),-total.employment,-industry) %>% 
+          rename(employment=employment.x,
+                 ttwa.code=ttwa.code.x,
+                 region=region.x)
+     
+     
+     
+     
+     
 
