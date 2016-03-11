@@ -113,7 +113,7 @@ ReadSubset_general <- function(file,variables) {
 #Input: x and y: 2 variables.
 #Returns their LQ
 LQ <- function(x,y) {
-        return((x/sum(x))/(y/sum(y)))
+        return((x/sum(x,na.rm=T))/(y/sum(y,na.rm=T)))
 }
 
 #GetSigTable function produces 2-sample t-test comparing a 
@@ -169,7 +169,7 @@ HighScore <- function(x,prob) {
 #GetHerfindahl function takes a distribution and returns its
 #Herfindahl index.
 GetHerfindahl <- function(vector) {
-     h <- sum((vector/sum(vector))^2)
+     h <- sum((vector/sum(vector,na.rm=T))^2,na.rm=T)
      return(h)
 }
 
@@ -388,7 +388,7 @@ WriteOut <- function(x,y,rnames=F) {
 #       w: width
 #       h: height
 #Saves the plot in the charts folder
-WriteChart <- function(x,y,w,h) {
+WriteChart <- function(x,y,w,h,...) {
         name <- deparse(substitute(x))
         pdf(paste0(y,name,Sys.Date(),".pdf"),width=w,height=h)
         print(x)

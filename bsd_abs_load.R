@@ -12,7 +12,7 @@ source("Rcode/bsd_abs_load_functions.R")
 
 #Read data from Excel spreadsheet which contains the information I need.
 #Load worksheet to get sheetNames
-enterpriseData <- loadWorkbook("vml_datasets_jan2016/spd - data for creative clusters - enterprise unit - 29-01-16.xls")
+enterpriseData <- loadWorkbook("vml_datasets_jan2016/spd - data for creative clusters - enterprise unit - 15-02-16.xls")
 sheetNames <- names(getSheets(enterpriseData))
 
 #Focus on sheet names with content (excluding those with ">>")
@@ -22,7 +22,7 @@ sheetNames.data <- sheetNames[!grepl(">>",sheetNames)]
 #Enterprise data is a list of tables extracted from the enterprise spreadsheet.
 enterprise.data <- lapply(sheetNames.data,
                           ReadWorkSheet,
-                          x="vml_datasets_jan2016/spd - data for creative clusters - enterprise unit - 29-01-16.xls",
+                          x="vml_datasets_jan2016/spd - data for creative clusters - enterprise unit - 15-02-16.xls",
                           z=3)
 names(enterprise.data) <- gsub("-","_",sheetNames.data)
 
@@ -120,11 +120,13 @@ names(gva_region_all_sectors)[3:6] <- paste0(names(gva_region_all_sectors)[3:6],
 #2.CLEAN
 #####
 
+names(ttwa_2007_all_creative)
+
 #1. ttwa.all data
 ttwa.all <- BindAreas(ttwa_2007_all_creative,ttwa_2010_all_creative,
                           ttwa_2014_all_creative) %>% tbl_df() %>%
-     rename(ttwa.code=ttwa.code..2011.,
-            ttwa.name=ttwa.name..2011.)
+     rename(ttwa.code=ttwa.2011.code..last.ons.revision.feb.2016.,
+            ttwa.name=ttwa.2011.name..last.ons.revision.feb.2016)
 
      #Label TTWAs and allocate them into regions (in the ttwa.all
           #dataset we are matching with GVA data)
@@ -161,11 +163,11 @@ ttwa.all <- BindAreas(ttwa_2007_all_creative,ttwa_2010_all_creative,
           select(-contains("uk."))
 
 #2. Subsectoral ttwa
-#NB there was an empty column #17 in ttwa_2011_14
+#NB there was an empty column #19 in ttwa_2011_14
 ttwa.sub <- BindAreas(ttwa_2007_10_subsector,
-                      ttwa_2011_14_subsector[,1:16]) %>% tbl_df() %>%
-     rename(ttwa.code=ttwa.code..2011.,
-            ttwa.name=ttwa.name..2011.)
+                      ttwa_2011_14_subsector[,-ncol(ttwa_2011_14_subsector)]) %>% tbl_df() %>%
+     rename(ttwa.code=ttwa.2011.code..last.ons.revision.feb.2016.,
+            ttwa.name=ttwa.2011.name..last.ons.revision.feb.2016)
 
 #Final cleaning of subsectoral ttwa including variable renames
 subsectors_ttwa <- ttwa.sub %>%
@@ -196,7 +198,7 @@ subsectors_ttwa <- ttwa.sub %>%
           
      #Estimate average all_sector employment 2008_10 and 2011_14
      ttwa_all.inds_for.gva_tmp <- ttwa_all_industries %>% tbl_df() %>%
-          rename(ttwa.code=ttwa.code..2011.) %>%
+          rename(ttwa.code=ttwa.2011.code..last.ons.revision.feb.2016.) %>%
           select(year,ttwa.code,total.employment) %>%
           filter(year!=2007) %>% 
           mutate(period=ifelse(year<=2010,"2008_10","2011_14")) %>%
