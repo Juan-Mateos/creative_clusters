@@ -1,5 +1,7 @@
 #Creative clusters data analysis
+setwd("Desktop/Creative Clusters/")
 source("Rcode/clusters_load_data.R")
+source("Rcode/clusters_data_analysis_functions.R")
 #Preparation
 #Create df with all the TTWA data (also normalised)
 
@@ -144,12 +146,12 @@ scatter_labels <- ldply(split(all.cis_ttwa_shares,
      filter(ttwa_lab!="")
 
 #Plot
-econ_import_scatter <- ggplot(data=all.cis_ttwa_shares3,
+econ_import_scatter <- ggplot(data=all.cis_ttwa_shares,
                  aes(y=business_local.share,
                      x=emp_local.share,size=employment,
                      fill=big_region))+
      scale_fill_manual(values=rev(my_palette4),
-                       limits=rev(levels(all.cis_ttwa_shares3$big_region)))+
+                       limits=rev(levels(all.cis_ttwa_shares$big_region)))+
      geom_point(alpha=0.9,pch=21,colour="darkgrey")+
      geom_hline(data=mean_econ_imp_scores2,
                 aes(yintercept=business_local.share),colour="darkblue",
@@ -459,12 +461,13 @@ WriteChart(econ_change_plot_binary,"final-report-figures/",w=9,h=6)
 
 #Plot levels of concentration in business and employment, by sector.
 #Remove turn_pw and work_pb
-concentration_raw_df <- ttwa_merged %>% filter(!(variable %in% 
-                                                      c("turn_pw",
-                                                        "work_pb"))) %>%
+concentration_raw_df <- ttwa_merged %>% filter(variable %in% 
+                                                    c("business.count",
+                                                      "turnover",
+                                                      "employment")) %>%
      droplevels()
 
-
+concentration_raw_df$variable))[[1]]
 #Extract info
 concentration_prop_df <- ldply(split(concentration_raw_df,
                                      list(concentration_raw_df$period.string,
@@ -734,6 +737,9 @@ alpha_values <- Get_Alphas(lowest=0.4,dims=20)
 #MAPPING
 library(ggrepel)
 library(maptools)
+library(gridExtra)
+library(grid)
+
 
 #Import the shapefile as a df
 ttwa_shape <- CreateTTWAmapping_df_2011() %>%
@@ -931,7 +937,7 @@ for (i in 1:length(my_colocation_matrices)) {
 dev.off()
 
 #Colour branches based in our clusters
-install.packages("dendextend")
+#install.packages("dendextend")
 library(dendextend)
 
 pdf("final-report-figures/dendrograms.pdf",w=9,h=6)
@@ -1010,7 +1016,7 @@ ttwa_merged_labs <- ttwa_merged %>% filter(variable %in% c("business.count",
 
 
 #Generate clustering scores     
-agglom_stats_df <- ldply(list("business"=business.lq_clusters,
+_df <- ldply(list("business"=business.lq_clusters,
                                  "employment"=emp.lq_clusters), function(x) {
                                       #Subset df
                                       #Find the variable to do this (inside the
@@ -1078,7 +1084,7 @@ agglom_stats_df <- ldply(list("business"=business.lq_clusters,
 Get_UK_Clusters <- function(option,threshold=0.75,return=10) {
      #Option: second period or change?
      if(option=="second.period"){
-          my_df <- agglom_stats_df %>% filter(period.string=="second.period") %>%
+          my_df <- _df %>% filter(period.string=="second.period") %>%
                select(-.id)
           gimme_tops <- ldply(
                split(my_df,my_df$variable),
@@ -1094,7 +1100,7 @@ Get_UK_Clusters <- function(option,threshold=0.75,return=10) {
           return(gimme_tops)
      }
      if(option=="change") {
-          my_df <- agglom_stats_df %>% filter(period.string!="second.period") %>%
+          my_df <- _df %>% filter(period.string!="second.period") %>%
                select(-.id)
           gimme_tops <- ldply(
                split(my_df,my_df$variable),
@@ -1130,7 +1136,7 @@ my_clusters_final2 <- ldply(list("concentration"="second.period",
 #sort(table(my_clusters_final2$ttwa.name))
 
 #Let's see what they look like.
-agglom_stats_selected <- agglom_stats_df %>% filter(ttwa.name %in% my_clusters_final2$ttwa.name) %>%
+agglom_stats_selected <- _df %>% filter(ttwa.name %in% my_clusters_final2$ttwa.name) %>%
      tbl_df()
 
 agglom_stats_for_hm <- agglom_stats_selected %>% select(-.id) %>%
@@ -1192,83 +1198,518 @@ cluster_scores <- ggplot(data=agglom_stats_for_hm2,
 
 WriteChart(cluster_scores,"final-report-figures/",w=9,h=6)
 
-#What is the regional distribution?
-selected_reg_distr <- ttwa_region_lu %>%
-     mutate(is_selected = ttwa.name %in% my_clusters_final2$ttwa.name) %>%
-     group_by(big_region) %>%
-     summarise(tot=sum(is_selected),
-          proportion_selected=mean(is_selected)) %>% 
-     mutate(prop_total=tot/sum(tot)) %>%
-     arrange(desc(proportion_selected))
+#Produce a chart with average performance by area and regions.
+s_cluster_perf_bubble <-
+     agglom_stats_for_hm %>% merge(ttwa_region_lu,by="ttwa.name") %>%
+     select(-contains("qt"))
 
-#Are there clusters of clusters?
-# hm_by_areas <-agglom_stats_for_hm %>%
-#      select(-contains("_qt")) %>%
-#      melt(id.vars=c("ttwa.name")) %>%
-#      select(ttwa.name,variable,value) %>%
-#      dcast(variable~ttwa.name)
-# 
-# hm_cormat <- cor(hm_by_areas[,-1],method="spearman")
-# 
-# my_hm <- heatmap(hm_cormat)
-# pdf("final-report-figures/heatmap_areas.pdf")
-# heatmap(hm_cormat)
-# dev.off()
-
-                                   
-
-#Get top clusters in each of these variables (for sense-checking)
-top_clusters <- lapply(clustering_scores,function(x){
-     my_df <- x
-     top_scores <- lapply(split(x,x$label), function(y) {
-          threshold <- quantile(y$metric)[[4]]
-          rankings <- y %>% filter(metric>threshold) %>%
-               arrange(desc(metric)) %>%
-               extract(1:40,"ttwa.name") %>% as.data.frame()
-          #names(rankings) <- paste0("ttwa_name_",y)
-          return(rankings)
-     })
-     return(top_scores)
-})
-
-#Some checks: correlations between metrics.
-
-combined_df <- do.call(rbind,clustering_scores) %>% dcast(ttwa.name~label,
-                                                          value.var="metric_lq")
-
-correlations <- cor(combined_df[,-1],use="pairwise.complete.obs")
-
-WriteChart(heatmap(correlations,margins = c(20,20)),"final-report-figures/")
+#Get high concentration
+s_cluster_perf_bubble$high_conc<- 
+     apply(s_cluster_perf_bubble[,grep("second.period",names(s_cluster_perf_bubble))],
+           1,
+           function(x){
+                return(mean(x,na.rm=T))
+           })
 
 
+#Get high diversity
+s_cluster_perf_bubble$high_div<- 
+     apply(s_cluster_perf_bubble[,grep("second.period",names(s_cluster_perf_bubble))],
+           1,
+           function(x){
+                return(sum(x>1,na.rm=T))
+           })
+
+#Get high growth
+s_cluster_perf_bubble$high_change <- 
+     apply(s_cluster_perf_bubble[,grep("change",names(s_cluster_perf_bubble))],1,
+           function(x){
+                #highg <- x > 0
+                #return(sum(highg))
+                return(mean(x,na.rm=T))
+           })
+
+#Subset df for plotting
+s_cluster_perf_bubble2 <- s_cluster_perf_bubble %>%
+     select(ttwa.name,big_region,contains("high"))
+
+#Plot
+#Reorder area levels for colouring
+
+s_cluster_perf_bubble2$big_region <- factor(s_cluster_perf_bubble2$big_region,
+                                       levels=c("Northern Ireland",
+                                                "Scotland","North","Wales",
+                                                "Midlands","East","London","South"))
+
+
+cluster_perf_bubble <- ggplot(data=s_cluster_perf_bubble2,
+                             aes(x=high_conc,y=high_change,
+                                 fill=big_region,size=high_div))+
+#      geom_jitter(position=position_jitter(w=.05,h=.05),
+#                  pch=21,colour="azure4") +
+     geom_hline(yintercept=mean(s_cluster_perf_bubble2$high_change),
+                linetype=2,size=0.4,col="darkblue")+
+     geom_vline(xintercept=mean(s_cluster_perf_bubble2$high_conc),
+                linetype=2,size=0.4,col="darkblue")+
+     geom_point(alpha=0.75,pch=21,colour="azure4")+
+     scale_size(range=c(1,5))+
+     scale_fill_manual(values=my_palette4)+
+     scale_y_continuous(label=percent)+
+     geom_text_repel(aes(label=ttwa.name,fill=NULL,size=NULL,colour=NULL),
+                     size=1.3,segment.size=0.001)+
+     labs(title="Average concentration, growth and sectoral diversity",
+          x="Mean clustering",
+          y="Mean growth",fill="Region",
+          size="Number of sectors with high \n specialisation")
+WriteChart(cluster_perf_bubble,"final-report-figures/",w=9,h=6)
+
+#What's the coverage of the 45 areas?
+clust_coverage <- all.cis_ttwa %>% filter(period.string=="second.period") %>%
+     mutate(selected = ttwa.name %in% my_clusters) %>%
+     group_by(selected) %>%
+     summarise(tot.emp=sum(employment,na.rm=T),
+               tot.turn=sum(turnover,na.rm=T),
+               tot.bc=sum(business.count,na.rm=T))
+
+#Calculate coverage
+clust_coverage["props",-1] <- 100*(clust_coverage[2,-1]/
+     colSums(clust_coverage[,-1]))
+
+#Sectoral distribution.
+my_clusters_w_region <- ttwa_region_lu %>%
+     mutate(in_top=ifelse(ttwa.name %in% my_clusters,"yes","no"))
+Percentify(prop.table(table(my_clusters_w_region$big_region,
+      my_clusters_w_region$in_top),1))
+
+my_clusters_w_region %>% filter(in_top=="yes") %>% select(ttwa.name,region) %>%
+     arrange(ttwa.name) %>%
+     as.data.frame()
+
+#Produce cluster composition measures.
+my_clusters <- unique(my_clusters_final2$ttwa.name)
+cluster_composition_selected <- ttwa_merged %>% 
+     filter(ttwa.name %in% my_clusters, 
+            variable %in% c("business.count","employment"),
+            period.string == "first.period",
+            !(industry %in% c("All creative industries",
+                              "All Industries"))) %>% select(-period.string) %>%
+     droplevels()
+
+#Calculate objects for plotting (props we use for stacked barchart and
+     #herfindahls for ordering)
+cluster_composition_plot_objects <- 
+     lapply(split(cluster_composition_selected,
+                 list(cluster_composition_selected$variable,
+                      cluster_composition_selected$ttwa.name)),
+           function(x){
+                x$prop = x$value / sum(x$value,na.rm=T)
+                
+                herf = data.frame(
+                     ttwa.name=x$ttwa.name[1],
+                     var=x$variable[1],
+                     herf=sum(x$prop^2))
+                
+                return(list(x,herf))
+           })
+                
+#Extract them. We want a df with the props stuff and a
+     #vector with 
+#df
+cluster_composition_to_plot <- ldply(cluster_composition_plot_objects,
+                                     function(x){
+                                          return(x[[1]])
+                                     },.id=NULL)     
+
+cluster_composition_diversity <- ldply(cluster_composition_plot_objects,
+                                       function(x){
+                                            return(x[[2]])
+                                       },.id=NULL) %>%
+     group_by(ttwa.name) %>%
+     filter(var!="business.count") %>%
+     summarise(mean_conc=mean(herf,na.rm=T)) %>%
+     arrange(desc(mean_conc)) %>% as.data.frame() %>%
+     extract(,"ttwa.name")
+
+#Reordering of variables and renaming of levels for plotting
+#Area names
+cluster_composition_to_plot$ttwa.name <- ReorderFactor(
+     cluster_composition_to_plot$ttwa.name,
+     cluster_composition_diversity,z=F)
+
+#Industries (by level of importance)
+cluster_composition_to_plot$industry <- 
+     with(cluster_composition_to_plot,
+          reorder(industry,prop,FUN = mean))
+
+levels(cluster_composition_to_plot$variable) <- c("Business count","Employment")
+
+#Palette is my_palette2
+
+#Plot
+cluster_comp_chart2 <- ggplot(data=
+                                   cluster_composition_to_plot[
+                                        order(cluster_composition_to_plot$prop),],
+                    aes(x=ttwa.name,y=prop,fill=factor(industry)))+
+     geom_bar(stat="identity") +
+     scale_fill_manual(values=my_palette2,
+                       breaks=rev(levels(cluster_composition_to_plot$industry)))+
+     scale_y_continuous(label=percent)+
+     labs(title="Industrial composition of selected clusters",
+          x=NULL,y=NULL,fill="Creative \n subsector")+
+     facet_grid(.~variable) + coord_flip()+
+     theme(legend.position="bottom",
+           axis.text.y=element_text(size=7))
+
+WriteChart(cluster_comp_chart2,"final-report-figures/",w=9,h=6)
+
+#Plot cluster growth rankings.
+#What exactly?
+     #For each cluster, growth in CIs.
+     #While alphaing over the total levels of activity
 
 
 
+#Get a dataframe to work with
+selected_ttwas_plot <- ttwa_econ_change_df %>% 
+     filter(period.string %in% c("change","first.period"),
+            ttwa.name %in% my_clusters,
+            !(variable %in% c("All Industries","All creative industries")),
+            is_normalised=="not.normalised") %>%
+     droplevels() %>% select(-is_normalised)
+
+
+#Produce alphas
+selected_ttwas_plot2 <- ldply(split(selected_ttwas_plot,
+                                    list(selected_ttwas_plot$metric,
+                                         selected_ttwas_plot$variable)),
+                              function(x){
+                                   x_wide <- 
+                                        dcast(x,
+                                                  ttwa.name+variable+metric~period.string,
+                                              value.var="value") %>%
+                                        rename(industry=variable)
+                                   x_wide$my_alpha <- 
+                                        cut(x_wide$first.period,
+                                            breaks = quantile(x_wide$first.period,
+                                                              probs=c(0,0.5,1)),
+                                                              include.lowest=TRUE,
+                                            labels=1:2)
+                                   x_out <- x_wide %>% select(-first.period) %>%
+                                        melt(id.vars=c("ttwa.name",
+                                                       "industry","metric","my_alpha")) %>%
+                                        select(-variable)
+                                   return(x_out)
+                              },.id=NULL)
+
+#Plot for every variable in metric.
+
+clean_var_names <- list("business count","turnover","employment",
+                        "turnover per worker","average firm size")
+
+names(clean_var_names) <- levels(selected_ttwas_plot$metric)
+
+selected_growth_plots <- lapply(
+     levels(selected_ttwas_plot$metric), function(x){
+          sub_df <- 
+               selected_ttwas_plot2 %>% filter(metric == x)
+          
+          #Order TTWAs
+          ttwas_ranked <- sub_df %>% group_by(ttwa.name) %>%
+               summarise(mean_g = mean(value,na.rm=T)) %>%
+               arrange(desc(mean_g)) %>% as.data.frame() %>%
+               extract(,"ttwa.name")
+          
+          #Title
+          my_title = paste("Change in",clean_var_names[[x]],"by selected area and creative subsector, 2007/10-2011/14")
+          
+          sub_df$ttwa.name <- ReorderFactor(sub_df$ttwa.name,
+                                            ttwas_ranked,z=F)
+          
+          
+          #Plot
+          qplot <- 
+               ggplot(data=sub_df,
+                 aes(x=industry,y=log(value),fill=industry,alpha=my_alpha))+
+               geom_bar(stat="identity",position="dodge",
+                        colour="azure4",size=0.01)+
+               facet_wrap(~ttwa.name,nrow = 8,ncol=6)+
+               coord_flip()+
+               scale_fill_manual(values=my_palette2,
+                                 breaks=rev(levels(cluster_composition_to_plot$industry)))+
+               scale_alpha_discrete(range=c(0.8,1),guide="none")+
+               labs(title=my_title,x=NULL,y="Growth (logged)")+
+               theme(axis.text.y=element_blank(),
+                     axis.text.x=element_text(size=6),
+                     axis.ticks.y=element_blank(),
+                     legend.position="bottom",
+                     strip.text=element_text(size=7,lineheight = 0.02))     
+               
+               return(qplot)
+     }
+)
+
+pdf("final-report-figures/growth_plots.pdf",w=9,h=6)
+for (i in 1:length(selected_growth_plots)) {
+     print(selected_growth_plots[[i]])
+}
+dev.off()
+
+#Create a bubblechart considering growth in business, growth in
+     #employment and growth in sales per worker and 
+     #growth in average firm sizes. Colour by regions.
+
+#Label each location with its "top cluster"?
+top_sector_cluster <- agglom_stats_for_hm %>%
+     select(ttwa.name, contains("second.period")) %>%
+     select(-contains("_qt"))
+top_sector_cluster$top_area <- apply(top_sector_cluster[,c(2:ncol(top_sector_cluster))],1,
+                                     function(x){
+                                          index <- which.max(x)
+                                          name_opts1 <- colnames(top_sector_cluster)[2:ncol(top_sector_cluster)]
+                                          name <- name_opts1[index]
+                                          name_clean <- unlist(str_split(name,"_"))[3]
+                                          return(capitalize(name_clean))
+                                     })
+
+
+bubble_plot_chart <- 
+     selected_ttwas_plot2 %>% select(-my_alpha) %>%
+     filter(metric!="turnover") %>% droplevels() %>%
+     group_by(ttwa.name,metric) %>%
+     summarise(mean_value=mean(value,na.rm=T)) %>%
+     dcast(ttwa.name~metric) %>% left_join(ttwa_region_lu,
+                                           by="ttwa.name") %>%
+     left_join(top_sector_cluster[,c("ttwa.name","top_area")],by="ttwa.name")
+#Reorder region names for colouring
+bubble_plot_chart$big_region <- factor(bubble_plot_chart$big_region,
+                                         levels=c("Northern Ireland",
+                                                  "Scotland","North","Wales",
+                                                  "Midlands","East","London","South"))
+
+#Get horizontal and vertical lines
+x_intercept = mean(bubble_plot_chart$employment,na.rm=T)-1
+y_intercept = mean(bubble_plot_chart$business.count,na.rm=T)-1
+
+#Palette
+activity_palette <- c('#8dd3c7','#ffffb3','#bebada','#fb8072')
+
+selected_bubble_chart <- ggplot(data=bubble_plot_chart,
+                aes(x=employment-1,
+                    y=business.count-1,fill=big_region))+
+     geom_hline(aes(yintercept = y_intercept),
+                linetype=2,size=0.5,colour="darkgrey")+
+     geom_vline(aes(xintercept = x_intercept),
+                linetype=2,size=0.5,colour="darkgrey")+
+     geom_point(
+          pch=21,colour="azure4",size=2)+
+     labs(title="Average growth in business count and employment by area",
+          x="Average growth in employment",
+          y="Average growth in  business count",
+          fill="region")+
+     scale_fill_manual(values=my_palette4)+
+     scale_x_continuous(label=percent)+
+     scale_y_continuous(label=percent)+
+     geom_text_repel(aes(label=ttwa.name,fill=NULL,size=NULL,colour=NULL),
+                      size=1.3,segment.size=0.001)
 
 
 
+WriteChart(selected_bubble_chart,"final-report-figures/",w=9,h=6)
+
+#Waste of time!
+
+#Correlation matrices.
+
+sector_change_corrmatr <- ldply(split(selected_ttwas_plot2,
+                                      selected_ttwas_plot2$industry),
+                                function(x){
+                                     x2 <- x %>% select(-my_alpha) %>%
+                                          dcast(ttwa.name~metric,
+                                                value.var="value")
+                                     x2[,-1] <- sapply(x2[,-1],log)
+                                     c_mat <- cor(x2[,-1],
+                                                  use="pairwise.complete.obs") %>%
+                                          melt()
+                                     names(c_mat) <- c("variable1","variable2","r")
+                                     return(c_mat)
+                                },.id="industry")
+
+sector_change_corrmatr$variable1 <- sapply(sector_change_corrmatr$variable1,
+                                           function(x){
+                                                return(capitalize(clean_var_names[[x]]))
+                                           })
+sector_change_corrmatr$variable2 <- sapply(sector_change_corrmatr$variable2,
+                                           function(x){
+                                                return(capitalize(clean_var_names[[x]]))
+                                           })
+
+#Reorder levels for variables
+sector_change_corrmatr$variable1 <- factor(sector_change_corrmatr$variable1,
+                                           levels=c("Business count",
+                                                    "Employment",
+                                                    "Turnover",
+                                                    "Turnover per worker",
+                                                    "Average firm size"))
+
+sector_change_corrmatr$variable2 <- factor(sector_change_corrmatr$variable2,
+                                           levels=rev(c("Business count",
+                                                    "Employment",
+                                                    "Turnover",
+                                                    "Turnover per worker",
+                                                    "Average firm size")))
+
+#And for sectors
+levels(sector_change_corrmatr$industry)[5] <- "Music & \n performing arts"
+
+sector_change_corrmatr$industry <- factor(sector_change_corrmatr$industry,
+                                          levels=c("Publishing","Film, radio & TV",
+                                                   "Music & \n performing arts",
+                                                   "Advertising","Design","Software & digital",
+                                                   "Architecture"))
+
+#Plot                                          
+sector_corrplot <- ggplot(data=sector_change_corrmatr,
+                 aes(x=variable1,y=variable2,fill=r))+
+     geom_tile(colour="azure4",size=0.001)+
+     scale_fill_gradient2(high="red",low="blue",midpoint = 0)+
+     facet_grid(.~industry)+
+     labs(title="Correlations in growth rates for different variables by creative sub-sector",
+          y=NULL,x=NULL,fill="Correlation coefficient")+
+     theme(axis.text=element_text(size=8),
+           axis.text.x=element_text(angle=45,hjust=1),
+           legend.position="bottom",
+           strip.text=element_text(size=9))
+
+WriteChart(sector_corrplot,"final-report-figures/",w=9,h=3.4)
 
 
+#Consider capabilities
+#We need to integrate: 
+     #HESA data
+     #REF data
+     #HE BCI data
+     #Network data?
+
+#Select variables:
+     #HESA data:
+
+hesa_ttwa_analysis <- ttwa.subject.year %>%
+     filter(subject.short %in% c("art.design","compsci"),
+            .id=="2013/14") %>% dcast(ttwa.name~subject.short,value.var="qual.totals")
+
+ref_ttwa_analysis <- ref.outcomes_with.lq %>%
+     filter(measure=="Overall") %>% 
+     dcast(ttwa.name~subject,value.var="fte.4star_ttwa")
+
+he_bci_analysis <- he.bci.cc_ttwa %>%
+     select(ttwa.name,business.turnover,
+            sme.engagement,
+            sme.training,
+            event.attendees)
+
+capability_ttwa_df <- join_all(list(hesa_ttwa_analysis,ref_ttwa_analysis,he_bci_analysis),
+                               by="ttwa.name",type="full") %>%
+     filter(ttwa.name %in% my_clusters)
+
+#Create deciles
+capability_ttwa_df[,paste0(names(capability_ttwa_df)[-1],"_decile")] <-
+     sapply(capability_ttwa_df[,names(capability_ttwa_df)[-1]],
+            function(x){
+                 y <- cut(x,breaks=quantile(x,probs=seq(0,1,0.1),
+                          na.rm=TRUE),include.lowest = TRUE,labels=1:10)
+                 y <- as.numeric(y)
+                 #Make missing zeros = no activity in that area
+                 y[is.na(y)] <- 0
+                 return(as.numeric(y))
+            })
 
 
+capability_ttwa_df_dec <- capability_ttwa_df %>% select(ttwa.name,contains("_decile")) %>%
+     melt(id.var="ttwa.name")
+
+#Clean and rank variable names
+ttwa_ranks <- capability_ttwa_df_dec %>% group_by(ttwa.name) %>%
+     summarise(m_val=mean(value,na.rm=T)) %>% arrange(desc(m_val)) %>%
+     as.data.frame() %>% extract(,"ttwa.name")
+
+capability_ttwa_df_dec$ttwa.name <- ReorderFactor(capability_ttwa_df_dec$ttwa.name,
+                                                  y=ttwa_ranks,z=T)
+
+clean_local_asset_names <- 
+     list("Qualifiers- Computer Science","Qualifiers- Arts & Design",
+          "Research- Arts and Design","Research- Computer Science",
+          "Knowledge Exchange- Spin-out turnover",
+          "Knowledge Exchange- SME engagement",
+          "Knowledge Exchange- SME training",
+          "Knowledge Exchange- Event attendees")
+
+names(clean_local_asset_names) <- levels(capability_ttwa_df_dec$variable)
+
+capability_ttwa_df_dec$clean_name <- as.character(clean_local_asset_names[capability_ttwa_df_dec$variable])
+
+#Reorder levels
+capability_ttwa_df_dec$clean_name <- factor(capability_ttwa_df_dec$clean_name,
+                                            levels=c(
+                                                 "Qualifiers- Computer Science","Qualifiers- Arts & Design",
+                                                 "Research- Arts and Design","Research- Computer Science",
+                                                 "Knowledge Exchange- Spin-out turnover",
+                                                 "Knowledge Exchange- SME engagement",
+                                                 "Knowledge Exchange- SME training",
+                                                 "Knowledge Exchange- Event attendees"))
+#Plot
+cap_heatmap <- 
+     ggplot(capability_ttwa_df_dec,
+          aes(y=ttwa.name,x=clean_name,fill=value))+
+     geom_tile(colour="azure4",size=0.001)+
+     scale_fill_gradient2(midpoint = 5,high="red",low="blue",
+                          na.value = "lightgrey")+
+     labs(title="Local knowledge capabilities in selected areas",
+          y=NULL,x=NULL,fill="Decile of capability \n compared to other areas")+
+     theme(axis.text.x=element_text(angle=45,,size=8,hjust=1))
 
 
+WriteChart(cap_heatmap,"final-report-figures/",w=9,h=6)
+
+#And a couple of bubble charts with levels of qualifiers/reseaech vs.
+     #activity in relevant areas, in terms of activity and growth.
+agglom_stats_bubble <- agglom_stats_for_hm2 %>%
+     filter(grepl("bc_services|bc_content",variable)==TRUE) %>%
+     mutate(sector_type=ifelse(grepl("services",variable)==TRUE,"Services","Content")) %>%
+     select(ttwa.name,src,value,sector_type) %>%
+     rename(score=value)
+
+capab_stats_bubble <- capability_ttwa_df_dec %>%
+     filter(grepl("Qualifiers|Research",clean_name)) %>%
+     mutate(sector_type=ifelse(grepl("Arts",clean_name)==TRUE,
+            "Content","Services"),
+            cap_type=ifelse(grepl("Qualifiers",clean_name)==TRUE,
+            "Qualifiers","Research")) %>%
+     select(ttwa.name,cap_type,value,sector_type) %>%
+     dcast(ttwa.name+sector_type~cap_type)
+
+bubble_chart2 <- merge(agglom_stats_bubble,capab_stats_bubble,
+                       by=c("ttwa.name","sector_type")) %>%
+     filter(src=="Concentration")
+
+bubble_chart2[is.na(bubble_chart2)] <- 0
+
+bubble_chart2 %>% filter(ttwa.name=="Cambridge")
+
+
+qbplot <- ggplot(data=bubble_chart2,
+                 aes(x=Qualifiers,y=Research,size=score,fill=score))+
+     geom_hline(yintercept = 5,linetype=2,size=0.3)+
+     geom_vline(xintercept = 5,linetype=2,size=0.3)+
+     geom_point(pch=21,colour="azure4",alpha=0.8)+
+     geom_text_repel(aes(label=ttwa.name,fill=NULL,size=NULL,colour=NULL),
+                     size=1.8,segment.size=0.1,nudge_x=-0.05)+
+     facet_grid(sector_type~.)+
+     labs(title="Local capabilities (Research and Qualifiers) and creative activities",
+          x="Location decile in qualifier numbers",
+          y="Location decile in high quality research activity",
+          size="Levels of \nbusiness activity \nin sector (Decile)")+
+     scale_fill_gradient2(midpoint = 5,high="red",low="blue",guide="none")
      
-     
-
-
-#Distinguishing between industries.
-#How has this changed
-
-
-
-
-
-
-
-
-
-
-
+WriteChart(qbplot,"final-report-figures/",w=9,h=6)
 
 
